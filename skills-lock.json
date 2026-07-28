@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "Inventory Manager": {
+      "source": "jmsktm/claude-settings",
+      "sourceType": "github",
+      "skillPath": "skills/inventory-manager/SKILL.md",
+      "computedHash": "64bd4bee2a03f71f2fa566f466a3ef7b8464e0e23776c4b7b0b5267b5834688e"
+    },
+    "spreadsheet": {
+      "source": "davila7/claude-code-templates",
+      "sourceType": "github",
+      "skillPath": "cli-tool/components/skills/document-processing/spreadsheet/SKILL.md",
+      "computedHash": "1afaec31c8307ae578efb8e18cc6c7ff1c4bb4357201f87a22578434e17be7ce"
+    }
+  }
+}

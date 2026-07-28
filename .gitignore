@@ -1,0 +1,25 @@
+# Third-party skills are fetched by the installer, not vendored here.
+# They carry their own licenses — see docs/INSTALL-*.md for the fetch commands.
+.claude/
+.codex/
+
+# Secrets — never commit
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Excel / OS scratch
+~$*.xlsx
+*.tmp
+.firecrawl/
+.DS_Store
+Thumbs.db
