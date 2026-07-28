@@ -50,6 +50,8 @@ INFO_BG = "E8F0FE"
 # reader's machine — never use them in a workbook you email.
 FONT = "Arial"
 
+DEFAULT_COL_WIDTH = 13.0
+
 _rule = Side(style="thin", color=RULE)
 UNDERLINE = Border(bottom=_rule)
 NO_BORDER = Border()
@@ -101,7 +103,15 @@ def header_row(ws: Worksheet, row: int, headers: Sequence[str],
     if widths:
         for i, w in enumerate(widths):
             ws.column_dimensions[get_column_letter(1 + i)].width = w
-    ws.row_dimensions[row].height = 32
+
+    # Headers wrap, and Excel does not auto-grow a row whose height you have set. Size the
+    # row from the longest header against its own column width, or two-line headings like
+    # "שבועות כיסוי ממוצע" get their second line clipped.
+    lines = 1
+    for i, text in enumerate(headers):
+        w = widths[i] if widths and i < len(widths) else DEFAULT_COL_WIDTH
+        lines = max(lines, -(-len(str(text)) // max(6, int(w * 0.75))))
+    ws.row_dimensions[row].height = 20 + 14 * min(lines, 3)
     return row + 1
 
 
