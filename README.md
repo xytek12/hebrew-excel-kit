@@ -100,6 +100,42 @@ exists to prevent:
 that Excel reports `DisplayRightToLeft` and that formulas evaluate. `--strict` fails on
 warnings. Current demo: **8 sheets — 97 passed, 0 warnings, 0 failed.**
 
+## The MCP server does not set RTL — and that is the point
+
+Tested end to end against `excel-mcp-server` 1.29.0 with the tools live in a Claude Code
+session. Reads are flawless: Hebrew sheet names, Hebrew data and cross-sheet formulas with
+quoted Hebrew names all round-trip correctly.
+
+**But a sheet written through `write_data_to_excel` came out left-to-right** — `rightToLeft`
+unset, `readingOrder` missing on all 11 Hebrew cells, no column widths. Excel confirmed it
+rendered LTR. That is not a fault in the MCP; it is a data tool, not a localisation tool.
+It just means these are complementary, not redundant:
+
+| Tool | Job |
+|---|---|
+| Excel MCP server | hands — read, write, format, chart, pivot |
+| `hebrew-excel-rtl` skill | correctness — RTL, formats, wording, design |
+| `verify_rtl.py` | proof |
+| `fix_rtl.py` | repair |
+
+The verifier caught the MCP's own output as broken, and the repair tool fixed it:
+
+```bash
+py skills/hebrew-excel-rtl/scripts/fix_rtl.py workbook.xlsx --in-place
+```
+```
+  sheets scanned      9
+  sheets flipped RTL  1
+  cells given RTL     12
+  columns sized       5
+```
+
+After repair: **9 sheets — 108 passed, 0 warnings, 0 failed**, and Excel reports RTL on the
+previously-broken sheet.
+
+Run `fix_rtl.py` after **any** tool other than your own code touches a Hebrew workbook —
+that includes `pandas.to_excel` and most export buttons.
+
 ## The demo workbook
 
 **אופנת גלים בע״מ** — a fictional Israeli clothing chain with **6 branches**. All figures

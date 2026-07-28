@@ -115,7 +115,55 @@ literary Hebrew. Geresh `׳` and gershayim `״`, not ASCII quotes — `יח׳`, 
 Full guidance, condensed from `hebrew-content-writer`, `hebrew-i18n` and
 `israeli-ui-design-system`: `reference/hebrew-for-spreadsheets.md`.
 
-## Part 6 — Self-check every sheet, every time
+## Part 6 — Nothing else sets RTL for you
+
+**No Excel-writing tool sets RTL.** Not the Excel MCP server, not `pandas.to_excel`, not
+most export buttons, not an agent that has not read this skill. They all produce a
+left-to-right sheet with Hebrew sitting in it — the exact defect this skill exists to fix.
+
+Measured against `excel-mcp-server` 1.29.0: a sheet written through `write_data_to_excel`
+came out with `rightToLeft` unset, `readingOrder` missing on all 11 Hebrew cells, and no
+column widths. Excel confirmed it rendered left-to-right.
+
+That is not a fault in the MCP — it is a data tool and it does its job well. It just means
+the division of labour is:
+
+| Tool | Job |
+|---|---|
+| Excel MCP server | hands — read, write, format, chart, pivot |
+| this skill | correctness — RTL, formats, wording, design |
+| `verify_rtl.py` | proof |
+| `fix_rtl.py` | repair |
+
+**Always run the repair after any tool other than your own code touches a Hebrew workbook:**
+
+```bash
+python scripts/fix_rtl.py workbook.xlsx --in-place
+python scripts/verify_rtl.py workbook.xlsx --com
+```
+
+`fix_rtl.py` flips every Hebrew-bearing sheet, adds `readingOrder=2` while preserving
+existing alignment, estimates column widths, and turns gridlines off on formatted sheets.
+It does not invent design — layout, colour and wording still need Part 4.
+
+### A trap inside the repair
+
+`ws.column_dimensions` is a defaultdict. Merely **reading**
+`ws.column_dimensions['A'].width` creates the entry and hands back the phantom default
+`13.0`, which is then serialised as a real `<col>` record on save. So the obvious test —
+`if not ws.column_dimensions[letter].width:` — both lies (13.0 is truthy, so it never fires)
+and silently stamps a uniform useless width onto every column. `customWidth` is `True` on the
+phantom too, so it is no help either.
+
+Test membership first, before touching the key:
+
+```python
+already_sized = {k for k, d in ws.column_dimensions.items() if d.width}
+if letter not in already_sized:
+    ws.column_dimensions[letter].width = ...
+```
+
+## Part 7 — Self-check every sheet, every time
 
 Never hand over a workbook you have not run the checker against. A whole-workbook verdict
 hides the exact defect this skill exists to prevent, so the report is **per sheet**.
@@ -157,3 +205,4 @@ sheet holding a raw English export, say — say so explicitly in the handoff.
 | `scripts/rtl_helpers.py` | RTL mechanics, formats, tables, ignored-errors patch |
 | `scripts/excel_design.py` | The visual system — titles, KPI tiles, status colours |
 | `scripts/verify_rtl.py` | The per-sheet self-check |
+| `scripts/fix_rtl.py` | Repair RTL in a workbook some other tool wrote |
