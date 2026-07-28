@@ -37,24 +37,46 @@ foreach ($t in $targets) {
     Ok "$t\hebrew-excel-rtl"
 }
 
-Step "Installing the three supporting skills"
-# Not vendored in this repo - they carry their own licences. Fetched from source.
-$third = @(
-    @{ name = 'spreadsheet';       repo = 'davila7/claude-code-templates'; path = 'cli-tool/components/skills/document-processing/spreadsheet' },
-    @{ name = 'inventory-manager'; repo = 'jmsktm/claude-settings';        path = 'skills/inventory-manager' },
-    @{ name = 'audit-xls';         repo = 'anthropics/financial-services'; path = 'plugins/agent-plugins/model-builder/skills/audit-xls' }
+Step "Installing the supporting skills"
+# Not vendored in this repo - they carry their own licences. Fetched from source,
+# one clone per repo. Each was security-reviewed before being listed here - see
+# docs/SECURITY-REVIEW.md. -c core.longpaths=true matters: anthropics/skills holds
+# schema files whose paths overflow the Windows 260-char limit and break the clone.
+$sources = @(
+    @{ repo = 'anthropics/skills'; skills = @(
+        @{ name = 'xlsx'; path = 'skills/xlsx' }) },
+    @{ repo = 'BayramAnnakov/excel-hygiene'; skills = @(
+        @{ name = 'excel-hygiene'; path = '.' }) },
+    @{ repo = 'anthropics/financial-services'; skills = @(
+        @{ name = 'audit-xls';        path = 'plugins/vertical-plugins/financial-analysis/skills/audit-xls' },
+        @{ name = 'clean-data-xls';   path = 'plugins/vertical-plugins/financial-analysis/skills/clean-data-xls' },
+        @{ name = '3-statement-model'; path = 'plugins/vertical-plugins/financial-analysis/skills/3-statement-model' },
+        @{ name = 'dcf-model';        path = 'plugins/vertical-plugins/financial-analysis/skills/dcf-model' },
+        @{ name = 'comps-analysis';   path = 'plugins/vertical-plugins/financial-analysis/skills/comps-analysis' },
+        @{ name = 'xlsx-author';      path = 'plugins/vertical-plugins/financial-analysis/skills/xlsx-author' }) },
+    @{ repo = 'davila7/claude-code-templates'; skills = @(
+        @{ name = 'spreadsheet'; path = 'cli-tool/components/skills/document-processing/spreadsheet' }) },
+    @{ repo = 'jmsktm/claude-settings'; skills = @(
+        @{ name = 'inventory-manager'; path = 'skills/inventory-manager' }) }
 )
 if (Get-Command git -ErrorAction SilentlyContinue) {
     $tmp = Join-Path $env:TEMP "hek-$(Get-Random)"
-    foreach ($s in $third) {
-        $dest = Join-Path $tmp $s.name
-        & git clone --depth 1 --quiet "https://github.com/$($s.repo)" $dest 2>&1 | Out-Null
-        $src = Join-Path $dest ($s.path -replace '/', '\')
-        if (Test-Path $src) {
-            foreach ($t in $targets) { Copy-Item -Recurse -Force $src $t }
-            Ok "$($s.name)  (from $($s.repo))"
+    foreach ($srcRepo in $sources) {
+        $dest = Join-Path $tmp ($srcRepo.repo -replace '/', '_')
+        & git -c core.longpaths=true clone --depth 1 --quiet "https://github.com/$($srcRepo.repo)" $dest 2>&1 | Out-Null
+        foreach ($s in $srcRepo.skills) {
+            $src = if ($s.path -eq '.') { $dest } else { Join-Path $dest ($s.path -replace '/', '\') }
+            if (Test-Path $src) {
+                foreach ($t in $targets) {
+                    $skillDest = Join-Path $t $s.name
+                    if (Test-Path $skillDest) { Remove-Item $skillDest -Recurse -Force }
+                    Copy-Item -Recurse -Force $src $skillDest
+                    Remove-Item (Join-Path $skillDest '.git') -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                Ok "$($s.name)  (from $($srcRepo.repo))"
+            }
+            else { Warn "$($s.name): path not found in $($srcRepo.repo) - upstream may have moved it" }
         }
-        else { Warn "$($s.name): path not found in $($s.repo) - upstream may have moved it" }
     }
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -111,6 +133,60 @@ args = ["excel-mcp-server", "stdio"]
     }
 }
 
+if (-not $SkipMcp) {
+    Step "Live-Excel MCP server (excel-live - drives real Excel via COM)"
+    # sbroenne/mcp-server-excel: recalculation, PivotTables, Power Query, screenshots.
+    # Windows-only and needs Excel installed. Disclosure: the release build carries
+    # opt-out anonymous telemetry (tool names + hashed machine id; never file paths,
+    # cell values or formulas) - reviewed in docs/SECURITY-REVIEW.md.
+    if (-not (Test-Path 'Registry::HKEY_CLASSES_ROOT\Excel.Application')) {
+        Warn "Microsoft Excel not detected - skipping excel-live (the file-level MCP above still works)"
+    }
+    else {
+        $toolDir = "$env:USERPROFILE\tools\excel-mcp"
+        $exe = Join-Path $toolDir 'mcp-excel.exe'
+        if (-not (Test-Path $exe)) {
+            New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
+            try {
+                $rel = Invoke-RestMethod 'https://api.github.com/repos/sbroenne/mcp-server-excel/releases/latest'
+                $asset = $rel.assets | Where-Object { $_.name -like 'ExcelMcp-MCP-Server-*-windows.zip' } | Select-Object -First 1
+                $zip = Join-Path $toolDir $asset.name
+                Invoke-WebRequest $asset.browser_download_url -OutFile $zip
+                Expand-Archive -Path $zip -DestinationPath $toolDir -Force
+                Ok "downloaded $($rel.tag_name) to $toolDir"
+            }
+            catch { Warn "download failed: $($_.Exception.Message) - install manually from github.com/sbroenne/mcp-server-excel/releases" }
+        }
+        else { Ok "already present: $exe" }
+
+        if (Test-Path $exe) {
+            if ($Agent -in 'claude-code', 'both') {
+                if (Get-Command claude -ErrorAction SilentlyContinue) {
+                    $existing = (& claude mcp list 2>&1 | Out-String)
+                    if ($existing -match '(?m)^\s*excel-live:') { Ok "already registered with Claude Code" }
+                    else {
+                        & claude mcp add excel-live --scope user -- $exe 2>&1 | Out-Null
+                        if ($LASTEXITCODE -eq 0) { Ok "registered with Claude Code as excel-live" }
+                        else { Warn "could not register excel-live" }
+                    }
+                }
+            }
+            if ($Agent -in 'codex', 'both') {
+                $cfg = "$env:USERPROFILE\.codex\config.toml"
+                New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
+                if ((Test-Path $cfg) -and (Select-String -Path $cfg -Pattern 'mcp_servers.excel-live' -Quiet)) {
+                    Warn "mcp_servers.excel-live already present in $cfg - left untouched"
+                }
+                else {
+                    $block = "`n[mcp_servers.excel-live]`ncommand = `"$($exe -replace '\\','\\')`"`n"
+                    Add-Content -Path $cfg -Value $block -Encoding utf8
+                    Ok "appended to $cfg"
+                }
+            }
+        }
+    }
+}
+
 Step "Verifying"
 $env:PYTHONUTF8 = 1
 # The demo workbook has a Hebrew filename. Glob for it rather than writing it as a
@@ -123,7 +199,17 @@ if (-not $demo) {
     $demo = Get-ChildItem (Join-Path $root 'demo') -Filter *.xlsx |
             Select-Object -First 1 -ExpandProperty FullName
 }
-& py (Join-Path $root 'skills\hebrew-excel-rtl\scripts\verify_rtl.py') $demo
+$hasExcel = Test-Path 'Registry::HKEY_CLASSES_ROOT\Excel.Application'
+if ($hasExcel) {
+    # Adds the real PivotTables and saves cached formula values - openpyxl can do neither.
+    Push-Location (Join-Path $root 'demo')
+    try { & py com_finish.py } catch { Warn "com_finish failed: $($_.Exception.Message)" }
+    Pop-Location
+    & py (Join-Path $root 'skills\hebrew-excel-rtl\scripts\verify_rtl.py') $demo --com
+}
+else {
+    & py (Join-Path $root 'skills\hebrew-excel-rtl\scripts\verify_rtl.py') $demo
+}
 
 Write-Host "`nDone." -ForegroundColor Green
 Write-Host '  Claude Code : restart it, then the MCP Excel tools appear'

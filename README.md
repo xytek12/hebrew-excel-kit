@@ -26,16 +26,18 @@ cd hebrew-excel-kit ; powershell -ExecutionPolicy Bypass -File .\install.ps1 -Ag
 cd hebrew-excel-kit && bash install.sh both
 ```
 
-That installs 4 skills into `~/.claude/skills` and `~/.codex/skills`, registers the Excel MCP
-server, installs the Python packages, rebuilds the demo, and verifies it. Re-running is safe.
+That installs 11 skills into `~/.claude/skills` and `~/.codex/skills`, registers both Excel
+MCP servers, installs the Python packages, rebuilds the demo (with real PivotTables when
+Excel is present), and verifies it. Re-running is safe.
 
 ## What's in here
 
 | Path | What |
 |---|---|
 | `skills/hebrew-excel-rtl/` | **The main deliverable** — a Hebrew RTL Excel skill. Nothing equivalent exists on any marketplace. |
-| `demo/build_demo.py` | Generator for an 8-sheet Hebrew retail-chain model |
-| `demo/דוח-כספי-לדוגמה.xlsx` | The generated workbook — 766 live formulas |
+| `demo/build_demo.py` | Generator for a 10-sheet Hebrew retail-chain model |
+| `demo/com_finish.py` | The COM pass: real PivotTables + cached formula values through Excel itself |
+| `demo/דוח-כספי-לדוגמה.xlsx` | The generated workbook — 851 live formulas, 2 PivotTables, XLOOKUP cards |
 | `INSTALL.md` | Agent-readable install instructions |
 | `docs/INSTALL-*.md` | Per-platform detail: Claude Code, Codex, Claude Desktop |
 | `docs/SECURITY-REVIEW.md` | Source audit of every third-party component, done before install |
@@ -64,7 +66,8 @@ who did not build it.
    string in Python is the worst possible "fix"
 2. **Israeli formats** — 21 number, currency and date formats, each rendered through real Excel
 3. **Formulas** — openpyxl never evaluates them; Hebrew sheet names need quoting; ties break
-   `MATCH` and silently duplicate rows in a "top 10 worst" list
+   `MATCH` and silently duplicate rows in a "top 10 worst" list; XLOOKUP with a Hebrew
+   `if_not_found`, compound keys for two-condition lookups, same-sheet dropdown lists
 4. **Design for the reader** — one accent colour, no blue/black input convention, no merges,
    dashboard ordering, live insight sentences
 5. **Hebrew wording** — register, geresh/gershayim, ktiv maleh, typography, the number–gender
@@ -98,7 +101,8 @@ exists to prevent:
 
 `--com` on Windows additionally opens the file through real Excel and asserts, per sheet,
 that Excel reports `DisplayRightToLeft` and that formulas evaluate. `--strict` fails on
-warnings. Current demo: **8 sheets — 97 passed, 0 warnings, 0 failed.**
+warnings. Current demo: **10 sheets — 119 passed, 0 warnings, 0 failed, 851 formulas
+evaluated, 0 broken.**
 
 ## The MCP server does not set RTL — and that is the point
 
@@ -142,9 +146,16 @@ that includes `pandas.to_excel` and most export buttons.
 invented. ₪130k/month per store, 8.6% operating margin — deliberately realistic retail
 numbers rather than flattering ones.
 
+Built in two passes: `build_demo.py` (openpyxl — structure, formulas, design, tables,
+dropdowns) then `com_finish.py` (real Excel via COM — PivotTables, full recalculation,
+cached values). The order is one-way: an openpyxl re-save after the COM pass would delete
+the charts and pivots.
+
 | Sheet | What a manager gets from it |
 |---|---|
 | לוח בקרה | 6 KPI tiles, 6 plain-Hebrew sentences computed live, top-10 urgent items, 2 charts |
+| חיפוש מהיר | Interactive: pick a store or an item from a dropdown, XLOOKUP fills the card live |
+| ניתוח Pivot | Two **real PivotTables** — sales by category × store, stuck stock by status × store |
 | הנחות ופרמטרים | Every changeable number in the model, in one place, each with "why it matters" |
 | מלאי לפי חנות | 72 rows (12 SKUs × 6 branches) with weeks-of-cover and a status word |
 | סיכום חנויות | Which branch sells most, which has stock stuck, ranked |
@@ -160,17 +171,32 @@ The dashboard answers the questions directly, in Hebrew, and updates itself:
 
 ## What gets installed
 
-All reviewed before install — [`docs/SECURITY-REVIEW.md`](docs/SECURITY-REVIEW.md).
+All reviewed before install — [`docs/SECURITY-REVIEW.md`](docs/SECURITY-REVIEW.md). The
+stack covers the whole pipeline: **intake → structure → render → prove**.
 
-**MCP server** — [`haris-musa/excel-mcp-server`](https://github.com/haris-musa/excel-mcp-server)
-(4.1k★, MIT). 25 tools: read/write cells, formulas, pivot tables, charts, formatting,
-conditional formatting, data validation, tables. Does **not** require Excel to be installed.
+**MCP servers**
+- [`haris-musa/excel-mcp-server`](https://github.com/haris-musa/excel-mcp-server) (4.1k★, MIT)
+  — file-level: 25 tools, works **without** Excel installed
+- [`sbroenne/mcp-server-excel`](https://github.com/sbroenne/mcp-server-excel) (MIT, Windows+Excel)
+  — drives the **real Excel engine** via COM: live recalculation, PivotTables, Power Query,
+  DAX, range screenshots. Carries opt-out anonymous usage telemetry (no file content —
+  disclosed in the security review)
 
 **Skills**
-- `hebrew-excel-rtl` — this repo
+- `hebrew-excel-rtl` — this repo: RTL correctness, design, verify + repair
+- [`xlsx`](https://github.com/anthropics/skills) — Anthropic's official spreadsheet skill: the
+  zero-formula-errors gate, messy-file intake (Windows: clone with `core.longpaths=true`)
+- [`excel-hygiene`](https://github.com/BayramAnnakov/excel-hygiene) — independent error
+  checker + the Panko–Halverson spreadsheet-error taxonomy
+- [`clean-data-xls`, `audit-xls`, `3-statement-model`, `dcf-model`, `comps-analysis`,
+  `xlsx-author`](https://github.com/anthropics/financial-services) — the CFO layer (Anthropic,
+  first-party). Installed as **copied skills, not as the plugin** — the plugin form would
+  register 12 remote data connectors
 - [`spreadsheet`](https://github.com/davila7/claude-code-templates) — openpyxl/pandas conventions
 - [`inventory-manager`](https://github.com/jmsktm/claude-settings) — reorder points, forecasting
-- [`audit-xls`](https://github.com/anthropics/financial-services) — formula tracing, hardcode detection (Anthropic, first-party)
+
+**Deliberately rejected:** `xlsx-for-ai` (hosted API — spreadsheet data would leave the
+machine), `excel-automation` (macOS-only). Reasons in the security review.
 
 ## Known limits
 

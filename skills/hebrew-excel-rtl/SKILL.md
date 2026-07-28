@@ -86,6 +86,22 @@ unique sort key column and match on that:
 cell.value = f"=H{r}+ROW()/1000000"     # ranking unchanged, every value now distinct
 ```
 
+**Lookups: XLOOKUP on Excel 2021/365, INDEX+MATCH for anything older.** XLOOKUP defaults to
+exact match (VLOOKUP's most dangerous default is approximate) and takes an `if_not_found`
+argument — always pass it, in Hebrew, so a cleared input can never surface `#N/A`:
+
+```
+=XLOOKUP($B$6, 'סיכום חנויות'!$A$4:$A$9, 'סיכום חנויות'!$B$4:$B$9, "בחרו חנות")
+```
+
+XLOOKUP has no native two-condition form that works on a plain table. Add a hidden compound
+key column (`=A5&"|"&E5`) and look up `sku&"|"&store` against it. Never `VLOOKUP` with a
+hardcoded column number — inserting a column silently shifts every result.
+
+**Dropdown (data validation) lists must live on the same sheet.** A list that points at
+another sheet is stored by Excel as an x14 extension that openpyxl cannot round-trip.
+Put the source values in a hidden column on the same sheet and reference that.
+
 ## Part 4 — Design for the reader
 
 The audience is a manager who did not build the file and will look at it for ninety seconds.
@@ -145,6 +161,21 @@ python scripts/verify_rtl.py workbook.xlsx --com
 `fix_rtl.py` flips every Hebrew-bearing sheet, adds `readingOrder=2` while preserving
 existing alignment, estimates column widths, and turns gridlines off on formatted sheets.
 It does not invent design — layout, colour and wording still need Part 4.
+
+### When openpyxl is the wrong tool entirely
+
+Two hard limits, both verified:
+
+1. **Editing someone's existing complex workbook.** openpyxl corrupts files that carry
+   macros, exotic named ranges, or features it does not model — the file opens with a
+   repair prompt or not at all (confirmed upstream: anthropics/claude-code#22044). Edit
+   inherited complex workbooks through Excel's COM API or a COM-based MCP server, and keep
+   openpyxl for files you generate yourself.
+2. **PivotTables and charts.** openpyxl cannot *create* pivots, and an openpyxl
+   load→save round-trip silently **deletes** existing charts and pivots. So the order is
+   one-way: openpyxl builds → COM adds pivots/recalculates/saves → after that, only
+   read the file (the verifier is safe; `fix_rtl.py` is not). See `demo/com_finish.py`
+   for the pattern.
 
 ### A trap inside the repair
 

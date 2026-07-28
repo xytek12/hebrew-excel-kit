@@ -28,27 +28,46 @@ for t in "${TARGETS[@]}"; do
   ok "$t/hebrew-excel-rtl"
 done
 
-step "Installing the three supporting skills"
-# Not vendored in this repo — they carry their own licences. Fetched from source.
+step "Installing the supporting skills"
+# Not vendored in this repo — they carry their own licences. Fetched from source,
+# one clone per repo. Security review of each: docs/SECURITY-REVIEW.md.
 if command -v git >/dev/null 2>&1; then
   TMP=$(mktemp -d)
+  clone() {  # clone <repo> once, reuse for every skill it carries
+    local dir="$TMP/${1//\//_}"
+    [[ -d "$dir" ]] || git clone --depth 1 --quiet "https://github.com/$1" "$dir" 2>/dev/null || return 1
+    echo "$dir"
+  }
   while IFS='|' read -r NAME REPO SUBPATH; do
-    if git clone --depth 1 --quiet "https://github.com/$REPO" "$TMP/$NAME" 2>/dev/null \
-       && [[ -d "$TMP/$NAME/$SUBPATH" ]]; then
-      for t in "${TARGETS[@]}"; do cp -r "$TMP/$NAME/$SUBPATH" "$t/"; done
+    DIR=$(clone "$REPO") || { warn "$NAME: could not fetch from $REPO"; continue; }
+    SRC="$DIR/$SUBPATH"; [[ "$SUBPATH" == "." ]] && SRC="$DIR"
+    if [[ -d "$SRC" ]]; then
+      for t in "${TARGETS[@]}"; do
+        rm -rf "${t:?}/$NAME"
+        cp -r "$SRC" "$t/$NAME"
+        rm -rf "$t/$NAME/.git"
+      done
       ok "$NAME  (from $REPO)"
     else
-      warn "$NAME: could not fetch from $REPO - upstream may have moved it"
+      warn "$NAME: path not found in $REPO - upstream may have moved it"
     fi
   done <<'SKILLS'
+xlsx|anthropics/skills|skills/xlsx
+excel-hygiene|BayramAnnakov/excel-hygiene|.
+audit-xls|anthropics/financial-services|plugins/vertical-plugins/financial-analysis/skills/audit-xls
+clean-data-xls|anthropics/financial-services|plugins/vertical-plugins/financial-analysis/skills/clean-data-xls
+3-statement-model|anthropics/financial-services|plugins/vertical-plugins/financial-analysis/skills/3-statement-model
+dcf-model|anthropics/financial-services|plugins/vertical-plugins/financial-analysis/skills/dcf-model
+comps-analysis|anthropics/financial-services|plugins/vertical-plugins/financial-analysis/skills/comps-analysis
+xlsx-author|anthropics/financial-services|plugins/vertical-plugins/financial-analysis/skills/xlsx-author
 spreadsheet|davila7/claude-code-templates|cli-tool/components/skills/document-processing/spreadsheet
 inventory-manager|jmsktm/claude-settings|skills/inventory-manager
-audit-xls|anthropics/financial-services|plugins/agent-plugins/model-builder/skills/audit-xls
 SKILLS
   rm -rf "$TMP"
 else
   warn "git not found - skipping. See INSTALL.md step 3 for manual commands."
 fi
+# The live-Excel MCP (sbroenne/mcp-server-excel) is Windows-only — install.ps1 handles it.
 
 step "Excel MCP server"
 if ! command -v uvx >/dev/null 2>&1; then

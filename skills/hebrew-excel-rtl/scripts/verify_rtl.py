@@ -124,7 +124,16 @@ def check_sheet(ws) -> None:
     else:
         rep.sheet(name, "Merged cells", OK, "none")
 
-    sized = sum(1 for d in ws.column_dimensions.values() if d.width)
+    # Excel groups equal-width columns into one ranged <col min max> record on save,
+    # which openpyxl parses as a single ColumnDimension. Count the span, not the keys,
+    # or a workbook that has been saved by real Excel under-reports its sized columns.
+    sized_cols: set[int] = set()
+    for key, d in ws.column_dimensions.items():
+        if d.width:
+            lo = d.min if d.min else openpyxl.utils.column_index_from_string(key)
+            hi = d.max if d.max else lo
+            sized_cols.update(range(lo, hi + 1))
+    sized = len(sized_cols)
     used_cols = max((c.column for c in cells), default=0)
     if used_cols == 0:
         rep.sheet(name, "Column widths", SKIP, "empty sheet")

@@ -58,36 +58,50 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
 Copy-Item -Recurse -Force ".\skills\hebrew-excel-rtl" "$env:USERPROFILE\.claude\skills\"
 ```
 
-## Step 3 — the three supporting skills
+## Step 3 — the ten supporting skills
 
-Not vendored here — they carry their own licences. Fetch from source.
+Not vendored here — they carry their own licences. Fetch from source and copy into the
+same skills directory as step 2. All ten are listed with paths in `manifest.json`; each
+was security-reviewed before being listed (`docs/SECURITY-REVIEW.md`).
 
-**Claude Code** (installs into the current project's `.claude/skills/`):
+| Skill | From | What it adds |
+|---|---|---|
+| `xlsx` | `anthropics/skills` | Official spreadsheet skill: zero-formula-errors gate, messy-file intake |
+| `excel-hygiene` | `BayramAnnakov/excel-hygiene` | Independent error checker + spreadsheet-error taxonomy |
+| `audit-xls` | `anthropics/financial-services` | Formula tracing, hardcode detection |
+| `clean-data-xls` | `anthropics/financial-services` | Normalize messy raw data before analysis |
+| `3-statement-model` | `anthropics/financial-services` | IS/BS/CF model structure |
+| `dcf-model` | `anthropics/financial-services` | DCF valuation + validator script |
+| `comps-analysis` | `anthropics/financial-services` | Peer benchmarking with multiples |
+| `xlsx-author` | `anthropics/financial-services` | Headless .xlsx production discipline |
+| `spreadsheet` | `davila7/claude-code-templates` | openpyxl/pandas conventions |
+| `inventory-manager` | `jmsktm/claude-settings` | Reorder points, forecasting, ABC |
+
+Clone each repo **once** and copy the paths from `manifest.json`. Two things to know:
+
+- **Windows:** clone `anthropics/skills` with `git -c core.longpaths=true` — it holds
+  schema files whose paths overflow the 260-character limit and break the clone.
+- **Do NOT install `financial-analysis` as a plugin.** The plugin form registers 12
+  remote MCP connectors (FactSet, Moody's, PitchBook…). Copy the six skills instead —
+  same content, no external endpoints.
 
 ```bash
-npx -y skills add davila7/claude-code-templates --skill spreadsheet --agent claude-code
+git -c core.longpaths=true clone --depth 1 https://github.com/anthropics/skills /tmp/ansk && cp -r /tmp/ansk/skills/xlsx ~/.claude/skills/
 ```
 ```bash
-npx -y skills add jmsktm/claude-settings --skill "Inventory Manager" --agent claude-code
+git clone --depth 1 https://github.com/BayramAnnakov/excel-hygiene ~/.claude/skills/excel-hygiene && rm -rf ~/.claude/skills/excel-hygiene/.git
 ```
 ```bash
-claude plugin marketplace add anthropics/financial-services
+git clone --depth 1 https://github.com/anthropics/financial-services /tmp/afs && for s in audit-xls clean-data-xls 3-statement-model dcf-model comps-analysis xlsx-author; do cp -r "/tmp/afs/plugins/vertical-plugins/financial-analysis/skills/$s" ~/.claude/skills/; done
 ```
 ```bash
-claude plugin install model-builder@claude-for-financial-services
+git clone --depth 1 https://github.com/davila7/claude-code-templates /tmp/cct && cp -r /tmp/cct/cli-tool/components/skills/document-processing/spreadsheet ~/.claude/skills/
+```
+```bash
+git clone --depth 1 https://github.com/jmsktm/claude-settings /tmp/jms && cp -r /tmp/jms/skills/inventory-manager ~/.claude/skills/
 ```
 
-**Codex, or any agent without the `skills` CLI** — clone and copy:
-
-```bash
-git clone --depth 1 https://github.com/davila7/claude-code-templates /tmp/cct && cp -r /tmp/cct/cli-tool/components/skills/document-processing/spreadsheet ~/.codex/skills/
-```
-```bash
-git clone --depth 1 https://github.com/jmsktm/claude-settings /tmp/jms && cp -r /tmp/jms/skills/inventory-manager ~/.codex/skills/
-```
-```bash
-git clone --depth 1 https://github.com/anthropics/financial-services /tmp/afs && cp -r /tmp/afs/plugins/agent-plugins/model-builder/skills/audit-xls ~/.codex/skills/
-```
+For Codex repeat with `~/.codex/skills/`.
 
 ## Step 4 — the Excel MCP server
 
@@ -132,25 +146,66 @@ On Windows give `uvx` its absolute path; Desktop does not inherit your shell PAT
 **Restart the agent afterwards.** MCP servers connect at session start — a server added
 mid-session reports as connected but its tools are not callable until a new session.
 
+## Step 4b — the live-Excel MCP server (Windows + Excel only)
+
+`sbroenne/mcp-server-excel` drives the **real Excel engine** via COM — live recalculation,
+PivotTables, Power Query, DAX, and range screenshots the agent can look at. It covers the
+two things the file-level server cannot: making formulas actually evaluate, and proving
+what Excel really renders.
+
+Skip this step on macOS/Linux or when Excel is not installed — everything else still works.
+
+Download `ExcelMcp-MCP-Server-<version>-windows.zip` from
+[the latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest), extract
+`mcp-excel.exe` to `%USERPROFILE%\tools\excel-mcp\`, then:
+
+**Claude Code:**
+```powershell
+claude mcp add excel-live --scope user -- "$env:USERPROFILE\tools\excel-mcp\mcp-excel.exe"
+```
+
+**Codex** — add to `~/.codex/config.toml`:
+```toml
+[mcp_servers.excel-live]
+command = "C:\\Users\\YOURNAME\\tools\\excel-mcp\\mcp-excel.exe"
+```
+
+**Claude Desktop** — download the `.mcpb` file from the same release page and double-click it.
+
+> Disclosure (from the security review): release builds send opt-out anonymous telemetry —
+> tool names, duration, a hashed machine id. Never file paths, cell values, or formulas.
+> Close all Excel files before using it; it needs exclusive access during automation.
+
 ## Step 5 — verify the install
 
 ```bash
 py demo/build_demo.py
 ```
+
+On Windows with Excel, also run the finishing pass — it builds the real PivotTables and
+saves cached formula values (openpyxl can do neither):
+
+```bash
+py demo/com_finish.py
+```
+
 ```bash
 py skills/hebrew-excel-rtl/scripts/verify_rtl.py "demo/דוח-כספי-לדוגמה.xlsx" --com
 ```
 
-Expected: a per-sheet report ending in `8 sheets — 96 passed, 0 warnings, 0 failed`.
-Drop `--com` off Windows; the static checks still run.
+Expected after both passes: `10 sheets — 119 passed, 0 warnings, 0 failed`.
+Without Excel (no `com_finish.py`, no `--com`): 9 sheets, static checks only.
+
+**Never re-save the finished workbook with openpyxl** — an openpyxl load/save round-trip
+silently deletes the charts and the PivotTables.
 
 If `verify_rtl.py` reports failures on a freshly cloned repo, something in the install is
 wrong — do not ignore it.
 
 ## Step 6 — tell the user what to do next
 
-Report which of the four skills installed, whether the MCP server connected, and that they
-must restart the agent for the MCP tools to appear. Then they can just ask, in Hebrew:
+Report which of the eleven skills installed, which of the two MCP servers connected, and
+that they must restart the agent for the MCP tools to appear. Then they can just ask, in Hebrew:
 
 > תבנה לי דוח כספי בעברית עם מלאי לפי חנות ולוח בקרה
 

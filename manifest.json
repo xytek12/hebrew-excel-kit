@@ -1,14 +1,14 @@
 {
   "name": "hebrew-excel-kit",
-  "version": "2.0.0",
-  "description": "Hebrew RTL Excel for AI coding agents: skill, verifier, design system, demo workbook.",
+  "version": "3.0.0",
+  "description": "Hebrew RTL Excel for AI coding agents: skill, verifier, repair tool, design system, CFO-grade skill stack, demo workbook with real PivotTables and XLOOKUP.",
   "repo": "https://github.com/xytek12/hebrew-excel-kit",
   "license": "MIT",
 
   "python": {
     "required": ["openpyxl>=3.1.5", "pandas", "xlsxwriter"],
     "optional": {
-      "pywin32": "Windows only. Enables `verify_rtl.py --com`, which checks the file through real Excel."
+      "pywin32": "Windows only. Enables `verify_rtl.py --com` and `demo/com_finish.py` (real PivotTables + cached formula values through Excel's COM API)."
     }
   },
 
@@ -23,7 +23,20 @@
       "tools": 25,
       "requires_microsoft_excel": false,
       "security_review": "docs/SECURITY-REVIEW.md",
-      "notes": "First launch downloads and builds the package; warm the cache once or the 30s MCP handshake times out. Use stdio — the HTTP transport binds 0.0.0.0 by default."
+      "notes": "File-level read/write/format/chart/pivot. First launch downloads and builds the package; warm the cache once or the 30s MCP handshake times out. Use stdio — the HTTP transport binds 0.0.0.0 by default. Does NOT set RTL — run fix_rtl.py on its output."
+    },
+    {
+      "id": "excel-live",
+      "package": "mcp-server-excel",
+      "source": "https://github.com/sbroenne/mcp-server-excel",
+      "transport": "stdio",
+      "command": "%USERPROFILE%\\tools\\excel-mcp\\mcp-excel.exe",
+      "args": [],
+      "tools": 26,
+      "requires_microsoft_excel": true,
+      "windows_only": true,
+      "security_review": "docs/SECURITY-REVIEW.md",
+      "notes": "Drives the REAL Excel engine via COM: recalculation, PivotTables, Power Query, DAX, VBA, range screenshots. Fills the two gaps file-level tools have: formulas that never evaluate, and no way to prove what Excel actually renders. Disclosure: release builds carry opt-out anonymous telemetry (tool names, duration, hashed machine id — never file paths, cell values or formulas)."
     }
   ],
 
@@ -32,14 +45,70 @@
       "name": "hebrew-excel-rtl",
       "origin": "this repo",
       "path": "skills/hebrew-excel-rtl",
-      "why": "Hebrew RTL Excel: per-sheet RTL, reading order, Israeli formats, manager-readable design, per-sheet self-check. Nothing equivalent exists on any marketplace."
+      "why": "Hebrew RTL Excel: per-sheet RTL, reading order, Israeli formats, manager-readable design, per-sheet self-check, repair tool. Nothing equivalent exists on any marketplace."
+    },
+    {
+      "name": "xlsx",
+      "origin": "github",
+      "repo": "anthropics/skills",
+      "path": "skills/xlsx",
+      "why": "Anthropic's official spreadsheet skill: the zero-formula-errors gate (recalc.py), messy-file intake, the external-link trap. First-party.",
+      "clone_note": "On Windows clone with `git -c core.longpaths=true` — the repo holds schema paths that overflow the 260-char limit."
+    },
+    {
+      "name": "excel-hygiene",
+      "origin": "github",
+      "repo": "BayramAnnakov/excel-hygiene",
+      "path": ".",
+      "why": "Independent 'second pair of eyes': deterministic mechanical checker (number-as-text, hardcode-over-formula, truncated SUM, percent x100) plus the Panko-Halverson spreadsheet-error taxonomy. Apache-2.0."
+    },
+    {
+      "name": "audit-xls",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/vertical-plugins/financial-analysis/skills/audit-xls",
+      "why": "Formula tracing, hardcode detection, balance checks on an inherited workbook. First-party Anthropic."
+    },
+    {
+      "name": "clean-data-xls",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/vertical-plugins/financial-analysis/skills/clean-data-xls",
+      "why": "Normalize messy raw spreadsheets: whitespace, casing, numbers-as-text, dates, dedupe, mixed-type columns. The intake step for any inherited file."
+    },
+    {
+      "name": "3-statement-model",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/vertical-plugins/financial-analysis/skills/3-statement-model",
+      "why": "Populate integrated IS/BS/CF model templates — the CFO-grade structure reference."
+    },
+    {
+      "name": "dcf-model",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/vertical-plugins/financial-analysis/skills/dcf-model",
+      "why": "DCF valuation with WACC and sensitivity analysis, plus a model validator script."
+    },
+    {
+      "name": "comps-analysis",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/vertical-plugins/financial-analysis/skills/comps-analysis",
+      "why": "Comparable-company benchmarking with multiples and outlier detection."
+    },
+    {
+      "name": "xlsx-author",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/vertical-plugins/financial-analysis/skills/xlsx-author",
+      "why": "Headless .xlsx production discipline for agent sessions with no open Office app."
     },
     {
       "name": "spreadsheet",
       "origin": "github",
       "repo": "davila7/claude-code-templates",
       "path": "cli-tool/components/skills/document-processing/spreadsheet",
-      "claude_code_install": "npx -y skills add davila7/claude-code-templates --skill spreadsheet --agent claude-code",
       "why": "openpyxl/pandas conventions and investment-banking formatting discipline."
     },
     {
@@ -47,16 +116,18 @@
       "origin": "github",
       "repo": "jmsktm/claude-settings",
       "path": "skills/inventory-manager",
-      "claude_code_install": "npx -y skills add jmsktm/claude-settings --skill \"Inventory Manager\" --agent claude-code",
       "why": "Reorder points, safety stock, demand forecasting, ABC classification."
+    }
+  ],
+
+  "deliberately_not_installed": [
+    {
+      "name": "financial-analysis plugin (as a plugin)",
+      "reason": "The plugin form bundles 12 remote MCP connectors (FactSet, Moody's, PitchBook...). The skills are installed individually instead, so no external endpoints get registered."
     },
     {
-      "name": "audit-xls",
-      "origin": "github",
-      "repo": "anthropics/financial-services",
-      "path": "plugins/agent-plugins/model-builder/skills/audit-xls",
-      "claude_code_install": "claude plugin marketplace add anthropics/financial-services && claude plugin install model-builder@claude-for-financial-services",
-      "why": "Formula tracing, hardcode detection, balance checks on an inherited workbook. First-party Anthropic."
+      "name": "xlsx-for-ai",
+      "reason": "Thin client over a hosted API — spreadsheet operations run server-side. Financial data must not leave the machine."
     }
   ],
 
@@ -65,6 +136,12 @@
     "codex": "~/.codex/skills/",
     "shared": "~/.agents/skills/",
     "claude-desktop": "Settings > Capabilities > Skills — ZIP upload, one per skill"
+  },
+
+  "demo": {
+    "build": "py demo/build_demo.py",
+    "finish_windows": "py demo/com_finish.py",
+    "finish_note": "com_finish.py needs Windows + Excel: it creates the real PivotTables and saves cached formula values. NEVER re-save the finished file with openpyxl — that deletes the charts and the pivots."
   },
 
   "verify": "py skills/hebrew-excel-rtl/scripts/verify_rtl.py \"demo/דוח-כספי-לדוגמה.xlsx\" --com"

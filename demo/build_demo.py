@@ -19,6 +19,7 @@ import openpyxl
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "skills", "hebrew-excel-rtl", "scripts"))
@@ -155,8 +156,8 @@ INV_HDR = r
 r = header_row(ws, r, ["מק״ט", "פריט", "מידה", "קטגוריה", "חנות", "מלאי (יח׳)",
                        "מכירות בחודש (יח׳)", "שבועות כיסוי", "סטטוס",
                        "מחיר מכירה", "עלות ליחידה", "מכירות בחודש (₪)", "שווי מלאי (₪)",
-                       "מפתח מיון"],
-               widths=[11, 24, 8, 12, 22, 12, 15, 13, 13, 13, 13, 17, 15, 12])
+                       "מפתח מיון", "מפתח חיפוש"],
+               widths=[11, 24, 8, 12, 22, 12, 15, 13, 13, 13, 13, 17, 15, 12, 12])
 INV_FIRST = r
 
 for j, store in enumerate(STORES):
@@ -173,17 +174,22 @@ for j, store in enumerate(STORES):
             # row for every tie, so the alert list would repeat one item. Adding a
             # row-derived epsilon makes every value distinct without moving the ranking.
             f"=H{r}+ROW()/1000000",
+            # Compound lookup key: SKU|store. XLOOKUP has no native two-condition form
+            # that works on a plain table, so the quick-lookup sheet matches on this.
+            f'=A{r}&"|"&E{r}',
         ], [None, None, None, None, None, FMT["int"], FMT["int"], "0.0", None,
             FMT["shekel"], FMT["shekel"], FMT["shekel_whole"], FMT["shekel_whole"],
-            "0.000000"],
+            "0.000000", None],
             align=["center", "right", "center", "right", "right", "center", "center",
-                   "center", "center", "right", "right", "right", "right", "center"])
+                   "center", "center", "right", "right", "right", "right", "center",
+                   "center"])
         r += 1
 
 INV_LAST = r - 1
 zebra(ws, INV_FIRST, INV_LAST, 13)
-add_table(ws, "טבלת_מלאי", f"A{INV_HDR}:N{INV_LAST}")
+add_table(ws, "טבלת_מלאי", f"A{INV_HDR}:O{INV_LAST}")
 ws.column_dimensions["N"].hidden = True
+ws.column_dimensions["O"].hidden = True
 status_colours(ws, f"I{INV_FIRST}:I{INV_LAST}",
                bad=["אזל", "קריטי"], warn=["נמוך"], good=["תקין"], info=["עודף"])
 freeze_header(ws, INV_FIRST)
@@ -199,6 +205,8 @@ STATUS_RNG = f"{INV}$I${INV_FIRST}:$I${INV_LAST}"
 SALES_RNG = f"{INV}$L${INV_FIRST}:$L${INV_LAST}"
 VALUE_RNG = f"{INV}$M${INV_FIRST}:$M${INV_LAST}"
 KEY_RNG = f"{INV}$N${INV_FIRST}:$N${INV_LAST}"
+KEY2_RNG = f"{INV}$O${INV_FIRST}:$O${INV_LAST}"
+UNITS_RNG = f"{INV}$G${INV_FIRST}:$G${INV_LAST}"
 
 # ===========================================================================
 # סיכום חנויות
@@ -371,6 +379,123 @@ add_table(ws, "טבלת_תזרים", f"A{CF_FIRST - 1}:F{CF_LAST}")
 freeze_header(ws, CF_FIRST)
 
 # ===========================================================================
+# חיפוש מהיר — interactive XLOOKUP panel
+# ===========================================================================
+# Two dropdown-driven cards. The manager picks a store (or an item in a store)
+# and every figure updates live — no formula knowledge needed. All lookups are
+# XLOOKUP with an if_not_found message, so a cleared dropdown can never show #N/A.
+# XLOOKUP needs Excel 2021 / Microsoft 365; the note at the bottom says so.
+ws = wb.create_sheet("חיפוש מהיר")
+hide_gridlines(ws)
+from openpyxl.styles import Border, Font as _Font, PatternFill as _Fill, Side as _Side  # noqa: E402
+from excel_design import FONT as _FONT, INFO, INFO_BG  # noqa: E402
+
+
+def input_cell(ws, coord: str, value: str) -> None:
+    """The one interactive element on the sheet — styled so it is obviously a control:
+    blue tint, blue border, bold. Everything else on the sheet is read-only output."""
+    c = ws[coord]
+    c.value = value
+    c.font = _Font(name=_FONT, size=12, bold=True, color=INFO)
+    c.fill = _Fill("solid", fgColor=INFO_BG)
+    side = _Side(style="medium", color=INFO)
+    c.border = Border(left=side, right=side, top=side, bottom=side)
+    from openpyxl.styles import Alignment as _Al
+    c.alignment = _Al(horizontal="center", vertical="center", readingOrder=2)
+
+
+r = page_title(ws, 1, "חיפוש מהיר",
+               "בוחרים חנות או פריט מהרשימה הנפתחת — כל המספרים מתעדכנים מיד.")
+for col, w in zip("ABCDEFGHIJK", [26, 22, 4, 26, 22, 4, 24, 4, 4, 12, 24]):
+    ws.column_dimensions[col].width = w
+
+# Dropdown sources live in hidden columns ON THIS SHEET. A validation list that
+# points at another sheet is stored by Excel as an x14 extension, which openpyxl
+# cannot round-trip — a local list stays a plain, portable validation.
+from openpyxl.styles import Alignment as _Alignment  # noqa: E402
+_RTL_CELL = _Alignment(horizontal="right", vertical="center", readingOrder=2)
+for i, item in enumerate(ITEMS):
+    ws[f"J{i + 1}"] = item[0]
+    ws[f"J{i + 1}"].alignment = _RTL_CELL
+for i, store in enumerate(STORES):
+    ws[f"K{i + 1}"] = store
+    ws[f"K{i + 1}"].alignment = _RTL_CELL
+ws.column_dimensions["J"].hidden = True
+ws.column_dimensions["K"].hidden = True
+SKU_LIST = f"'חיפוש מהיר'!$J$1:$J${len(ITEMS)}"
+STORE_LIST = f"'חיפוש מהיר'!$K$1:$K${len(STORES)}"
+
+STO_COL = lambda letter: f"{STO}${letter}${STO_FIRST}:${letter}${STO_LAST}"  # noqa: E731
+
+# --- card 1: store ---------------------------------------------------------
+r = section(ws, r, "כרטיס חנות", 5)
+r += 1
+data_row(ws, r, ["בחרו חנות מהרשימה:"], align=["right"])
+input_cell(ws, f"B{r}", STORES[3])
+STORE_PICK = f"$B${r}"
+dv = DataValidation(type="list", formula1=STORE_LIST, allow_blank=False)
+dv.error = "בחרו חנות מהרשימה הנפתחת"
+dv.errorTitle = "ערך לא ברשימה"
+ws.add_data_validation(dv)
+dv.add(ws[f"B{r}"])
+ws.row_dimensions[r].height = 24
+r += 2
+STORE_FIELDS = [
+    ("מכירות בחודש (₪)", "B", FMT["shekel_whole"]),
+    ("שווי מלאי (₪)", "C", FMT["shekel_whole"]),
+    ("פריטים שאזלו", "D", FMT["int"]),
+    ("פריטים קריטיים", "E", FMT["int"]),
+    ("שבועות כיסוי ממוצע", "F", "0.0"),
+    ("דירוג מכירות בשרשרת", "H", FMT["int"]),
+]
+CARD1_FIRST = r
+for label, col, fmt in STORE_FIELDS:
+    data_row(ws, r, [label,
+                     f'=XLOOKUP({STORE_PICK},{STO_COL("A")},{STO_COL(col)},"בחרו חנות")'],
+             [None, fmt], align=["right", "center"])
+    r += 1
+zebra(ws, CARD1_FIRST, r - 1, 2)
+r += 1
+
+# --- card 2: item in store -------------------------------------------------
+r = section(ws, r, "כרטיס פריט בחנות", 5)
+r += 1
+data_row(ws, r, ["בחרו מק״ט:", None, None, "בחרו חנות:"], align=["right", None, None, "right"])
+input_cell(ws, f"B{r}", ITEMS[3][0])
+input_cell(ws, f"E{r}", STORES[1])
+SKU_PICK = f"$B${r}"
+STORE2_PICK = f"$E${r}"
+dv_sku = DataValidation(type="list", formula1=SKU_LIST, allow_blank=False)
+ws.add_data_validation(dv_sku)
+dv_sku.add(ws[f"B{r}"])
+dv_sto = DataValidation(type="list", formula1=STORE_LIST, allow_blank=False)
+ws.add_data_validation(dv_sto)
+dv_sto.add(ws[f"E{r}"])
+ws.row_dimensions[r].height = 24
+r += 2
+KEY2 = f'{SKU_PICK}&"|"&{STORE2_PICK}'
+ITEM_FIELDS = [
+    ("פריט", ITEM_RNG, None),
+    ("מלאי בחנות (יח׳)", STOCK_RNG, FMT["int"]),
+    ("מכירות בחודש (יח׳)", UNITS_RNG, FMT["int"]),
+    ("שבועות כיסוי", COVER_RNG, "0.0"),
+    ("סטטוס", STATUS_RNG, None),
+    ("מכירות בחודש (₪)", SALES_RNG, FMT["shekel_whole"]),
+    ("שווי מלאי (₪)", VALUE_RNG, FMT["shekel_whole"]),
+]
+CARD2_FIRST = r
+for label, rng, fmt in ITEM_FIELDS:
+    data_row(ws, r, [label, f'=XLOOKUP({KEY2},{KEY2_RNG},{rng},"לא נמצא")'],
+             [None, fmt], align=["right", "center"])
+    r += 1
+STATUS_CELL = CARD2_FIRST + 4
+status_colours(ws, f"B{STATUS_CELL}", bad=["אזל", "קריטי"], warn=["נמוך"],
+               good=["תקין"], info=["עודף"])
+zebra(ws, CARD2_FIRST, r - 1, 2)
+r += 1
+note(ws, r, "הנוסחאות כאן הן XLOOKUP — נדרש Excel 2021 ומעלה או Microsoft 365.")
+
+# ===========================================================================
 # לוח בקרה — built last, moved to the front
 # ===========================================================================
 ws = wb.create_sheet("לוח בקרה")
@@ -481,6 +606,8 @@ line.height, line.width = 9, 18
 ws.add_chart(line, "K26")
 
 # ===========================================================================
+# Sheet order: dashboard first, quick lookup second, data sheets after.
+wb.move_sheet("חיפוש מהיר", offset=-(wb.sheetnames.index("חיפוש מהיר") - 1))
 rtl_workbook(wb)
 wb.save(OUT)
 # מידה holds labels ("32", "L", "יחיד"), not quantities — Excel would flag the
