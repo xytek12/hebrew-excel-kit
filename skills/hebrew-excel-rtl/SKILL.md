@@ -1,199 +1,159 @@
 ---
 name: hebrew-excel-rtl
-description: Build Hebrew right-to-left Excel workbooks that render correctly in real Excel. Use when creating, editing, or fixing .xlsx/.xlsm files that contain Hebrew, when the user asks for a Hebrew spreadsheet, "אקסל בעברית", "גיליון בעברית", "דוח כספי באקסל", an Israeli financial report, or a Hebrew BI/dashboard workbook. ALSO use for the symptom where a Hebrew spreadsheet looks fine in code or in a viewer but opens in Excel with columns in the wrong order, headers on the wrong side, or English/numbers/punctuation mangled inside Hebrew cells. Covers per-sheet RTL, per-cell reading order, shekel and Israeli date number formats, RTL tables, charts, conditional formatting, and a verification script. Do NOT use for Hebrew in web pages or CSS (use hebrew-rtl-best-practices) or Hebrew Word/PDF documents (use hebrew-document-generator).
+description: Build Hebrew right-to-left Excel workbooks that render correctly in real Excel and that a non-financial manager can actually read. Use when creating, editing, or fixing .xlsx/.xlsm files containing Hebrew, when the user asks for a Hebrew spreadsheet, "אקסל בעברית", "גיליון בעברית", "דוח כספי באקסל", "לוח בקרה", an Israeli financial report, an inventory or BI workbook, or wants a messy Hebrew workbook rebuilt cleanly. ALSO use for the symptom where a Hebrew spreadsheet looks fine in code or a viewer but opens in Excel with columns in the wrong order, headings on the wrong side, or numbers and English mangled inside Hebrew cells. Covers per-sheet RTL, per-cell reading order, Israeli number and date formats, Hebrew wording and typography, dashboard and report design for managers, and a per-sheet self-check. Do NOT use for Hebrew in web pages or CSS (use hebrew-rtl-best-practices) or Hebrew Word/PDF documents (use hebrew-document-generator).
 license: MIT
 compatibility: Claude Code, Claude Desktop, Codex, Cursor. Requires Python + openpyxl. No network required.
 ---
 
 # Hebrew RTL Excel
 
-## The one thing that breaks everything
+Two jobs, and both must be done or the file fails:
 
-Right-to-left in Excel is **not** a document setting and **not** a cell alignment. It is two
-independent switches that must both be set:
+1. **Make it render right** — RTL is two independent switches, not one.
+2. **Make it readable** — a Hebrew workbook nobody can interpret is a failed deliverable
+   even when every flag is correct.
+
+## Part 1 — The two switches
 
 | Switch | Scope | What it controls |
 |---|---|---|
 | `sheet_view.rightToLeft` | **per worksheet** | Column order. Whether `A1` sits top-**right** and columns run right→left. |
-| `Alignment(readingOrder=2)` | **per cell** | Bidi resolution *inside* the cell. Where numbers, Latin words, and punctuation land within a Hebrew string. |
+| `Alignment(readingOrder=2)` | **per cell** | Bidi resolution *inside* the cell. Where numbers, Latin words and punctuation land within a Hebrew string. |
 
-Setting only the first gives you a mirrored grid full of scrambled cells. Setting only the
-second gives you correct cells in a backwards grid. Both, or the workbook is wrong.
+Set only the first and you get a mirrored grid full of scrambled cells. Set only the second
+and you get correct cells in a backwards grid.
 
-`rightToLeft` is per **sheet** — a workbook with 6 sheets needs it set 6 times. This is the
-single most common defect; the first sheet looks right and nobody scrolls further.
-
-## Instructions
-
-### Step 1 — Flip every sheet
+`rightToLeft` is per **sheet**. A workbook with 8 sheets needs it 8 times. This is the single
+most common defect in the wild — the author only ever looked at the first tab.
 
 ```python
-for ws in wb.worksheets:
+for ws in wb.worksheets:            # always a loop, never per-sheet by hand
     ws.sheet_view.rightToLeft = True
 ```
 
-Write it as a loop over `wb.worksheets`, never per-sheet by hand. If a sheet must stay LTR
-(raw English export, a data dump feeding a formula), leave it and say so in the handoff —
-it is a legitimate choice, but it should be deliberate.
-
-### Step 2 — Set reading order on every cell holding text
-
-`readingOrder=2` is RTL. `readingOrder=1` is LTR. `0`/unset is "context" — Excel guesses
-from the first strong character, which is exactly the guessing you are trying to eliminate.
-
 ```python
 from openpyxl.styles import Alignment
-
-RTL = Alignment(horizontal="right", vertical="center", readingOrder=2, wrap_text=True)
+RTL = Alignment(horizontal="right", vertical="center", readingOrder=2)
 cell.alignment = RTL
 ```
 
-Use `readingOrder=2` on **every** cell, including the numeric ones. A bare number is
-unaffected, but the moment someone types `12 יח'` into it the cell resolves correctly.
+`readingOrder=2` is RTL, `1` is LTR, unset is "context" — Excel guesses from the first strong
+character, which is the guessing you are trying to eliminate. Apply it to **every** cell
+holding text, including numeric ones: a bare number is unaffected, but the moment someone
+types `12 יח׳` into it the cell resolves correctly.
 
-Verified mapping — openpyxl `readingOrder=2` becomes Excel's `xlRTL` (`-5004`) when read
-back through the COM API. Unset becomes `xlContext` (`-5002`).
+Verified: openpyxl `readingOrder=2` reads back through Excel's COM API as `xlRTL` (`-5004`);
+unset reads back as `xlContext` (`-5002`).
 
-### Step 3 — Use Israeli number formats
+**Never reverse a Hebrew string in Python to "fix" display.** The characters are already in
+the correct logical order; only the display resolution is wrong. Reversing corrupts the data
+and breaks search, sort and copy-paste.
 
-Never write `₪` as a literal prefix into the string. Use a number format so the value stays
-numeric and stays sortable.
+## Part 2 — Israeli formats
 
 ```python
-SHEKEL   = '#,##0.00\\ [$₪-40D]'
-SHEKEL_N = '#,##0.00\\ [$₪-40D];[Red]\\(#,##0.00\\ [$₪-40D]\\)'   # negatives red, in parens
-DATE_IL  = 'DD/MM/YYYY'
-PERCENT  = '0.0%'
+SHEKEL  = '#,##0.00\\ [$₪-40D]'                                     # 39.90 ₪
+SHEKEL_N = '#,##0.00\\ [$₪-40D];[Red]\\(#,##0.00\\ [$₪-40D]\\)'     # (2,396.00 ₪) in red
+DATE_IL = 'DD/MM/YYYY'                                              # 15/01/2026
+PERCENT = '0.0%'
 ```
 
-`[$₪-40D]` is the currency token with the Hebrew (Israel) locale id `40D` (hex for 1037).
-Without the locale id Excel may re-interpret the format on a machine with different regional
-settings. Verified rendering in Excel: `39.90 ₪`, and `(2,396.00 ₪)` in red for negatives.
+`[$₪-40D]` is the currency token with Hebrew (Israel) locale id `40D`. Without the locale id
+a machine with different regional settings may re-interpret the format.
 
-`DD/MM/YYYY` matters more than it looks. Write a date as a `datetime` object, never a
-string — a string date is text, sorts alphabetically, and breaks every formula downstream.
+Never put `₪` in the cell text — the value must stay numeric and sortable. Never write a date
+as a string — a text date sorts alphabetically, fails `SUMIFS`, and cannot be grouped in a
+pivot. Write `datetime.date` objects and format them.
 
-See `reference/number-formats.md` for the full table.
+Full table, all 21 formats rendered through real Excel: `reference/number-formats.md`.
 
-### Step 4 — Write formulas as strings and let Excel compute
+## Part 3 — Formulas
 
 openpyxl does **not** evaluate formulas. `cell.value = "=B2*C2"` stores the formula; the
-cached result is empty until Excel opens the file. This is normal and correct.
+cached result stays empty until Excel opens the file. This is correct behaviour, not a bug.
 
-Verified: a workbook written by openpyxl with `=B2*C2` opens in Excel showing `4788`.
-
-Two consequences:
-- **Never** read a computed value back with openpyxl expecting a number. You get `None` or
-  the formula string. If you need the value, either compute it in Python as well, or open
-  the file through Excel/LibreOffice once to populate the cache.
+- Reading a formula cell back in Python gives you the formula string or `None`, never the
+  number. If you need the value in Python, compute it in Python too.
 - Prefer real formulas over Python-computed constants for anything the user will maintain.
   A hardcoded total is a landmine; `=SUM(D2:D40)` survives them adding a row.
+- Quote Hebrew sheet names: `='רווח והפסד'!N12`.
 
-Hebrew sheet names inside formulas must be quoted: `='דוח מכירות'!D2`.
-
-### Step 5 — Tables, charts, panes
-
-All three survive the round trip and all three respect the sheet-level RTL flag.
+**Ties break `MATCH`.** `SMALL(range,k)` with `MATCH(...,0)` returns the *first* row holding
+that value, so a "top 10 worst" list silently repeats one item whenever values tie. Add a
+unique sort key column and match on that:
 
 ```python
-from openpyxl.worksheet.table import Table, TableStyleInfo
-tbl = Table(displayName="טבלת_מכירות", ref="A1:E40")   # underscores, no spaces
-tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
-ws.add_table(tbl)
+cell.value = f"=H{r}+ROW()/1000000"     # ranking unchanged, every value now distinct
 ```
 
-`displayName` accepts Hebrew but **not spaces** — openpyxl raises
-`ValueError: Table names cannot have spaces` at build time. Use underscores. The name must
-also be unique across the workbook.
+## Part 4 — Design for the reader
 
-Freeze the header with `ws.freeze_panes = "A2"`. In an RTL sheet Excel mirrors this
-automatically; do not try to compensate by freezing a different cell.
+The audience is a manager who did not build the file and will look at it for ninety seconds.
 
-For charts, set `chart.title` in Hebrew directly. Category axis labels come from the cells
-and inherit their reading order.
+- **One accent colour.** Colour on a number means "needs attention" and nothing else.
+- **Do not colour inputs blue and formulas black.** That is a modeller's debugging aid; to a
+  manager it looks like the file contains two kinds of money. Put every input on one named
+  assumptions sheet instead.
+- **Turn Excel's gridlines off** on any formatted sheet — they fight your own borders.
+- **Never merge inside data.** Use `Alignment(horizontal="centerContinuous")` — same look,
+  and sorting, filtering and pivots keep working. Note the camelCase; `center_continuous`
+  raises `ValueError`.
+- **Dashboard order:** title → 4–6 KPI tiles → plain-Hebrew insight lines → action table →
+  charts. Someone who reads only the insight lines should be able to run the meeting.
+- **Insight lines are computed, never hardcoded.** Build with `&` and `TEXT()`.
+- **Status columns carry the word, then the colour** — readable with colour stripped out.
+- **Every number gets its unit** in the header: `מכירות בחודש (₪)`, `מלאי (יח׳)`.
 
-### Step 6 — Verify, do not assume
+Full guidance: `reference/design-for-managers.md`. Ready-made helpers: `scripts/excel_design.py`.
 
-Run the bundled checker before you hand the file over:
+## Part 5 — Hebrew wording
+
+A cell label is UX copy: a few words read fast under pressure. Business register, not
+literary Hebrew. Geresh `׳` and gershayim `״`, not ASCII quotes — `יח׳`, `מק״ט`, `סה״כ`,
+`ש״ח`. Ktiv maleh, consistently. Arial unless you know the reader's fonts.
+
+Full guidance, condensed from `hebrew-content-writer`, `hebrew-i18n` and
+`israeli-ui-design-system`: `reference/hebrew-for-spreadsheets.md`.
+
+## Part 6 — Self-check every sheet, every time
+
+Never hand over a workbook you have not run the checker against. A whole-workbook verdict
+hides the exact defect this skill exists to prevent, so the report is **per sheet**.
 
 ```bash
-python scripts/verify_rtl.py path/to/workbook.xlsx
+python scripts/verify_rtl.py workbook.xlsx --com
 ```
 
-It fails loudly on: a sheet missing `rightToLeft`, Hebrew text cells with no `readingOrder`,
-currency columns without a number format, date columns stored as strings, and table names
-containing spaces.
+Per sheet it checks: RTL flag · reading order on every Hebrew cell · sheet name legality ·
+dates typed as dates · currency not written as text · merged cells · column widths set ·
+fill-palette size · frozen header · gridlines. With `--com` on Windows it additionally opens
+the file through real Excel and asserts, per sheet, that Excel reports `DisplayRightToLeft`
+and that the formulas evaluate.
 
-On Windows with Excel installed, add `--com` to additionally open the file through Excel and
-assert `DisplayRightToLeft` is true on every sheet and that formulas actually evaluate. That
-is the only check that proves the file is genuinely correct rather than merely well-formed.
+`--strict` makes warnings fail the run. Exit code 0 = clean.
 
-## Typography
-
-Hebrew Excel needs a font with real Hebrew coverage and Latin coverage that does not clash:
-
-| Font | Use | Notes |
-|---|---|---|
-| **Arial** | safest default | Ships with every Office install on every platform. Boring, universal. |
-| **Calibri** | Office 2007+ default | Good Hebrew. Safe on Windows and Mac Office. |
-| **David** | formal/legal Hebrew | Windows-only. Falls back badly on Mac. |
-| **Heebo**, **Rubik**, **Assistant** | branded reports | Google Fonts, must be installed on the reader's machine. Do not use for a file you are emailing to someone. |
-
-Pick **Arial** unless you know what the recipient has installed. A missing font silently
-substitutes and can change every column width in the workbook.
-
-Set an explicit font on every styled cell. Do not rely on the theme — the workbook theme
-carries Latin and East-Asian font slots but the Hebrew fallback is resolved by the OS.
-
-## Column widths
-
-Hebrew renders wider than the same character count in English, and openpyxl cannot measure
-text. Auto-fit does not exist in the file format — Excel computes it at render time and
-openpyxl has no equivalent.
-
-Estimate instead, and be generous:
-
-```python
-width = max(12, min(50, int(max(len(str(v)) for v in column_values) * 1.3) + 4))
-```
-
-The `1.3` factor is for Hebrew; a 1.0 factor produces visibly cramped columns. Cap at 50 so
-one long free-text cell does not blow out the layout.
-
-## Anti-patterns
-
-**Do not** write `dir` attributes, CSS, or HTML anywhere near this. That is the web RTL
-problem and shares nothing with the Excel one but the name.
-
-**Do not** reverse Hebrew strings in Python to "fix" display. If text looks backwards, the
-reading order is wrong — reversing the characters corrupts the actual data and breaks search,
-sort, and copy-paste. This is the single worst thing you can do to a Hebrew file.
-
-**Do not** put the `₪` sign in the cell text. Use the number format.
-
-**Do not** merge cells for layout. Merged cells break sorting, filtering, and pivot tables —
-the three things a BI workbook exists to do. Use `Alignment(horizontal="centerContinuous")`
-across a range if you need a visually centered banner without the merge. (Note the exact
-camelCase spelling — `center_continuous` raises `ValueError` in openpyxl.)
-
-**Do not** name a sheet with characters Excel forbids: `: \ / ? * [ ]`. Hebrew letters,
-spaces, and quotes are fine. Cap at 31 characters.
+Fix everything it reports before delivering. If you deliberately leave a warning — an LTR
+sheet holding a raw English export, say — say so explicitly in the handoff.
 
 ## Workflow for a messy inherited workbook
 
-1. Read it without touching it — `openpyxl.load_workbook(path, data_only=True)` to see cached
-   values, then again with `data_only=False` to see the formulas. You need both views.
-2. Map what exists before changing anything: sheet names, used ranges, which columns are
-   text vs numbers vs dates, where the formulas point, what is hardcoded.
-3. Report the defects you found and what you intend to do, then act. Inherited financial
-   workbooks encode undocumented business rules; a "cleanup" that silently drops one is worse
-   than the mess.
+1. Read it twice without touching it: `load_workbook(path, data_only=True)` for cached
+   values, then `data_only=False` for the formulas. You need both views.
+2. Map before changing: sheet names, used ranges, which columns are text vs numbers vs
+   dates, where formulas point, what is hardcoded.
+3. Report the defects and your intended plan, then act. Inherited financial workbooks encode
+   undocumented business rules; a cleanup that silently drops one is worse than the mess.
 4. Build the clean version as a **new file**. Never overwrite the source.
-5. Run `verify_rtl.py --com` on the result.
+5. Run `verify_rtl.py --com` and fix everything before handing over.
 
 ## Reference
 
-- `reference/number-formats.md` — full Israeli number, currency, date, and percent formats
-- `reference/pitfalls.md` — the failure modes with symptoms, causes, and fixes
-- `scripts/rtl_helpers.py` — importable helpers (`apply_rtl`, `style_header`, `autofit`)
-- `scripts/verify_rtl.py` — the checker, with optional real-Excel COM verification
+| File | What |
+|---|---|
+| `reference/number-formats.md` | 21 Israeli formats, each verified against real Excel |
+| `reference/pitfalls.md` | Failure modes: symptom → cause → fix |
+| `reference/design-for-managers.md` | Colour, layout, KPI tiles, insight lines |
+| `reference/hebrew-for-spreadsheets.md` | Register, punctuation, typography, plurals |
+| `scripts/rtl_helpers.py` | RTL mechanics, formats, tables, ignored-errors patch |
+| `scripts/excel_design.py` | The visual system — titles, KPI tiles, status colours |
+| `scripts/verify_rtl.py` | The per-sheet self-check |

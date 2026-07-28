@@ -1,0 +1,71 @@
+{
+  "name": "hebrew-excel-kit",
+  "version": "2.0.0",
+  "description": "Hebrew RTL Excel for AI coding agents: skill, verifier, design system, demo workbook.",
+  "repo": "https://github.com/xytek12/hebrew-excel-kit",
+  "license": "MIT",
+
+  "python": {
+    "required": ["openpyxl>=3.1.5", "pandas", "xlsxwriter"],
+    "optional": {
+      "pywin32": "Windows only. Enables `verify_rtl.py --com`, which checks the file through real Excel."
+    }
+  },
+
+  "mcp_servers": [
+    {
+      "id": "excel",
+      "package": "excel-mcp-server",
+      "source": "https://github.com/haris-musa/excel-mcp-server",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["excel-mcp-server", "stdio"],
+      "tools": 25,
+      "requires_microsoft_excel": false,
+      "security_review": "docs/SECURITY-REVIEW.md",
+      "notes": "First launch downloads and builds the package; warm the cache once or the 30s MCP handshake times out. Use stdio — the HTTP transport binds 0.0.0.0 by default."
+    }
+  ],
+
+  "skills": [
+    {
+      "name": "hebrew-excel-rtl",
+      "origin": "this repo",
+      "path": "skills/hebrew-excel-rtl",
+      "why": "Hebrew RTL Excel: per-sheet RTL, reading order, Israeli formats, manager-readable design, per-sheet self-check. Nothing equivalent exists on any marketplace."
+    },
+    {
+      "name": "spreadsheet",
+      "origin": "github",
+      "repo": "davila7/claude-code-templates",
+      "path": "cli-tool/components/skills/document-processing/spreadsheet",
+      "claude_code_install": "npx -y skills add davila7/claude-code-templates --skill spreadsheet --agent claude-code",
+      "why": "openpyxl/pandas conventions and investment-banking formatting discipline."
+    },
+    {
+      "name": "inventory-manager",
+      "origin": "github",
+      "repo": "jmsktm/claude-settings",
+      "path": "skills/inventory-manager",
+      "claude_code_install": "npx -y skills add jmsktm/claude-settings --skill \"Inventory Manager\" --agent claude-code",
+      "why": "Reorder points, safety stock, demand forecasting, ABC classification."
+    },
+    {
+      "name": "audit-xls",
+      "origin": "github",
+      "repo": "anthropics/financial-services",
+      "path": "plugins/agent-plugins/model-builder/skills/audit-xls",
+      "claude_code_install": "claude plugin marketplace add anthropics/financial-services && claude plugin install model-builder@claude-for-financial-services",
+      "why": "Formula tracing, hardcode detection, balance checks on an inherited workbook. First-party Anthropic."
+    }
+  ],
+
+  "install_targets": {
+    "claude-code": "~/.claude/skills/",
+    "codex": "~/.codex/skills/",
+    "shared": "~/.agents/skills/",
+    "claude-desktop": "Settings > Capabilities > Skills — ZIP upload, one per skill"
+  },
+
+  "verify": "py skills/hebrew-excel-rtl/scripts/verify_rtl.py \"demo/דוח-כספי-לדוגמה.xlsx\" --com"
+}

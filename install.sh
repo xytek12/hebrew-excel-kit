@@ -28,6 +28,28 @@ for t in "${TARGETS[@]}"; do
   ok "$t/hebrew-excel-rtl"
 done
 
+step "Installing the three supporting skills"
+# Not vendored in this repo — they carry their own licences. Fetched from source.
+if command -v git >/dev/null 2>&1; then
+  TMP=$(mktemp -d)
+  while IFS='|' read -r NAME REPO SUBPATH; do
+    if git clone --depth 1 --quiet "https://github.com/$REPO" "$TMP/$NAME" 2>/dev/null \
+       && [[ -d "$TMP/$NAME/$SUBPATH" ]]; then
+      for t in "${TARGETS[@]}"; do cp -r "$TMP/$NAME/$SUBPATH" "$t/"; done
+      ok "$NAME  (from $REPO)"
+    else
+      warn "$NAME: could not fetch from $REPO - upstream may have moved it"
+    fi
+  done <<'SKILLS'
+spreadsheet|davila7/claude-code-templates|cli-tool/components/skills/document-processing/spreadsheet
+inventory-manager|jmsktm/claude-settings|skills/inventory-manager
+audit-xls|anthropics/financial-services|plugins/agent-plugins/model-builder/skills/audit-xls
+SKILLS
+  rm -rf "$TMP"
+else
+  warn "git not found - skipping. See INSTALL.md step 3 for manual commands."
+fi
+
 step "Excel MCP server"
 if ! command -v uvx >/dev/null 2>&1; then
   warn "uvx not found. Install uv:  curl -LsSf https://astral.sh/uv/install.sh | sh"
@@ -42,8 +64,15 @@ else
 
   if [[ "$AGENT" == "claude-code" || "$AGENT" == "both" ]]; then
     if command -v claude >/dev/null 2>&1; then
-      claude mcp add excel --scope user -- uvx excel-mcp-server stdio >/dev/null 2>&1 || true
-      ok "registered with Claude Code (restart it to load the tools)"
+      # Idempotent: re-running the installer must not fail on an existing server.
+      if claude mcp list 2>/dev/null | grep -qE '^\s*excel:'; then
+        ok "already registered with Claude Code"
+      elif claude mcp add excel --scope user -- uvx excel-mcp-server stdio >/dev/null 2>&1; then
+        ok "registered with Claude Code"
+      else
+        warn "could not register - see docs/INSTALL-claude-code.md"
+      fi
+      echo "        (restart Claude Code for the MCP tools to appear)"
     else
       warn "'claude' CLI not on PATH - see docs/INSTALL-claude-code.md"
     fi
